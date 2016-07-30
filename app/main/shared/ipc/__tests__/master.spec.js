@@ -44,7 +44,6 @@ describe('master.js', () => {
         receiverMock.emit('connect', { agentName: 'agent0' }, mockReply);
         receiverMock.emit('connect', { agentName: 'agent1' }, mockReply);
 
-        const nextCallId = master.nextGlobalCallId;
         receiverMock.emit('call',
           { targetAgent: 'agent1', callId: 10, funcName: 'test', args: [] },
           (tag, data) => {
@@ -52,6 +51,8 @@ describe('master.js', () => {
             expect(data.result).toBeDefined();
             resolve();
           });
+
+        const nextCallId = master.nextGlobalCallId;
         receiverMock.emit(`repl:call:${nextCallId}`, { callId: nextCallId, result: 0 }, () => {});
       });
     });

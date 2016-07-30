@@ -9,6 +9,12 @@ class Agent {
     this.funcs = {};
     this.nextCallId = 0;
   }
+  allocateCallId() {
+    this.nextCallId += 1;
+    if (this.nextCallId > 9999999)
+      this.nextCallId = 0;
+    return this.nextCallId;
+  }
   connect(transport) {
     return new Promise((resolve, reject) => {
       // TODO add error handling
@@ -44,7 +50,7 @@ class Agent {
     this.funcs[funcName] = generator;
   }
   call(targetAgent, funcName, ...args) {
-    const thisCallId = this.nextCallId++;
+    const thisCallId = this.allocateCallId();
     return new Promise((resolve, reject) => {
       this.transport.once(`repl:call:${thisCallId}`, (data) => {
         const { result, error } = data;

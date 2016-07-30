@@ -8,6 +8,12 @@ class Master {
     this.localCallIds = {};
     this.nextGlobalCallId = 0;
   }
+  allocateGlobalCallId() {
+    this.nextGlobalCallId += 1;
+    if (this.nextGlobalCallId > 999999)
+      this.nextGlobalCallId = 0;
+    return this.nextGlobalCallId;
+  }
   addReceiver(receiver) {
     this.receivers.push(receiver);
     receiver.startListen(this.onMessage.bind(this));
@@ -36,7 +42,7 @@ class Master {
       return;
     }
     // if target agent exists
-    const globalCallId = this.nextGlobalCallId++;
+    const globalCallId = this.allocateGlobalCallId();
     this.localCallIds[globalCallId] = callId;
     this.callReplyFuncs[globalCallId] = reply;
     agentCallFunc('call', { callId: globalCallId, funcName, args });
