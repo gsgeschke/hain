@@ -1,13 +1,10 @@
 'use strict';
 
 const textutil = require('../shared/textutil');
-const rpc = require('./rpc-server');
+const agent = require('./server-agent');
 
 function enqueue(message, duration) {
-  rpc.send('mainwindow', 'on-toast', {
-    message: textutil.sanitize(message),
-    duration
-  });
+  agent.call('mainWindow', 'enqueueToast', textutil.sanitize(message), duration);
 }
 
 module.exports = { enqueue };

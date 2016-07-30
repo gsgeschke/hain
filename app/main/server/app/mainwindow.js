@@ -5,8 +5,8 @@ const shell = electron.shell;
 const BrowserWindow = electron.BrowserWindow;
 
 const platformUtil = require('../../../platform-util');
-const rpc = require('../rpc-server');
 const windowUtil = require('./windowutil');
+const agent = require('../server-agent');
 
 let browserWindow = null;
 
@@ -52,7 +52,7 @@ function showWindowOnCenter() {
 }
 
 function setQuery(query) {
-  rpc.send('mainwindow', 'set-query', query);
+  agent.call('mainWindow', 'setQuery', query);
 }
 
 function hideAndRefreshWindow(dontRestoreFocus) {

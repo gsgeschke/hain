@@ -1,10 +1,10 @@
 'use strict';
 
-const procMsg = require('./proc-msg');
+const agent = require('./worker-agent');
 const logger = require('../shared/logger');
 
 function call(service, func, args) {
-  procMsg.send('proxy', { service, func, args });
+  agent.call('server', 'callProxyFunc', service, func, args);
 }
 
 function wrapFunc(service) {

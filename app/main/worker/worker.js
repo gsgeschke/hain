@@ -1,16 +1,12 @@
 /* global process */
 'use strict';
 
-const co = require('co');
 const logger = require('../shared/logger');
 const globalProxyAgent = require('./global-proxy-agent');
-const procMsg = require('./proc-msg');
 const serverProxy = require('./server-proxy');
 const PreferencesObject = require('../shared/preferences-object');
 
-function ipcPipe(target, channel, msg) {
-  procMsg.send('on-ipc-pipe', { target, channel, msg });
-}
+const agent = require('./worker-agent');
 
 // Create a local copy of app-pref object
 const globalPrefObj = new PreferencesObject(null, 'global', {}, 'nokey');
@@ -25,99 +21,37 @@ const workerContext = {
 
 let plugins = null;
 
-function handleProcessMessage(msg) {
-  try {
-    const { type, payload } = msg;
-    const msgHandler = msgHandlers[type];
-    msgHandler(payload);
-  } catch (e) {
-    const err = e.stack || e;
-    procMsg.send('error', err);
-    logger.log(err);
-  }
-}
-
 function handleExceptions() {
   process.on('uncaughtException', (err) => {
     logger.log(err);
   });
 }
 
-function initialize(initialGlobalPref) {
-  co(function* () {
-    handleExceptions();
-    globalPrefObj.update(initialGlobalPref);
-    globalProxyAgent.initialize(globalPrefObj);
+function* initialize(initialGlobalPref) {
+  handleExceptions();
+  globalPrefObj.update(initialGlobalPref);
+  globalProxyAgent.initialize(globalPrefObj);
 
-    plugins = require('./plugins')(workerContext);
-    yield* plugins.initialize();
-
-    procMsg.send('ready');
-  }).catch((e) => {
-    const err = e.stack || e;
-    procMsg.send('error', err);
-    logger.log(err);
-  });
+  plugins = require('./plugins')(workerContext);
+  yield* plugins.initialize();
+  // TODO 에러 내보기 (SERVER에서 받을 수 있는가?)
 }
 
-const msgHandlers = {
-  initialize: (payload) => {
-    const { initialGlobalPref } = payload;
-    initialize(initialGlobalPref);
-  },
-  searchAll: (payload) => {
-    const { query, ticket } = payload;
-    const res = (obj) => {
-      const pipeMsg = {
-        ticket,
-        type: obj.type,
-        payload: obj.payload
-      };
-      ipcPipe('mainwindow', 'on-result', pipeMsg);
-    };
-    plugins.searchAll(query, res);
-  },
-  execute: (_payload) => {
-    const { pluginId, id, payload } = _payload;
-    plugins.execute(pluginId, id, payload);
-  },
-  renderPreview: (_payload) => {
-    const { ticket, pluginId, id, payload } = _payload;
-    const render = (html) => {
-      const pipeMsg = { ticket, html };
-      ipcPipe('mainwindow', 'on-render-preview', pipeMsg);
-    };
-    plugins.renderPreview(pluginId, id, payload, render);
-  },
-  buttonAction: (_payload) => {
-    const { pluginId, id, payload } = _payload;
-    plugins.buttonAction(pluginId, id, payload);
-  },
-  getPluginPrefIds: (payload) => {
-    const prefIds = plugins.getPrefIds();
-    procMsg.send('on-get-plugin-pref-ids', prefIds);
-  },
-  getPreferences: (payload) => {
-    const prefId = payload;
-    const pref = plugins.getPreferences(prefId);
-    procMsg.send('on-get-preferences', pref);
-  },
-  updatePreferences: (payload) => {
-    const { prefId, model } = payload;
-    plugins.updatePreferences(prefId, model);
-  },
-  commitPreferences: (payload) => {
-    plugins.commitPreferences();
-  },
-  resetPreferences: (payload) => {
-    const prefId = payload;
-    const pref = plugins.resetPreferences(prefId);
-    procMsg.send('on-get-preferences', pref);
-  },
-  updateGlobalPreferences: (payload) => {
-    const model = payload;
-    globalPrefObj.update(model);
-  }
-};
-
-process.on('message', handleProcessMessage);
+agent.define('initialize', initialize);
+agent.define('requestSearch', (ticket, query) => {
+  const res = (obj) => agent.call('mainWindow', 'updateResult', ticket, obj.type, obj.payload);
+  plugins.searchAll(query, res);
+});
+agent.define('requestExecute', (pluginId, id, payload) => plugins.execute(pluginId, id, payload));
+agent.define('requestRenderPreview', (ticket, pluginId, id, payload) => {
+  const render = (html) => agent.call('mainWindow', 'renderPreview', ticket, html);
+  plugins.renderPreview(pluginId, id, payload, render);
+});
+agent.define('requestButtonAction', (pluginId, id, payload) => plugins.buttonAction(pluginId, id, payload));
+agent.define('getPluginPrefIds', () => plugins.getPrefIds());
+agent.define('getPreferences', (prefId) => plugins.getPreferences(prefId));
+agent.define('updatePreferences', (prefId, model) => plugins.updatePreferences(prefId, model));
+agent.define('commitPreferences', () => plugins.commitPreferences());
+agent.define('resetPreferences', (prefId) => plugins.resetPreferences(prefId));
+agent.define('updateGlobalPreferences', (model) => globalPrefObj.update(model));
+agent.connect();

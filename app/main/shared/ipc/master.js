@@ -20,19 +20,21 @@ class Master {
   }
   onMessage(receiver, reply, tag, data) {
     if (tag === 'connect') {
-      this.handleConnect(receiver, reply, data);
+      this.handleConnect(reply, data);
     } else if (tag === 'call') {
-      this.handleFunctionCall(receiver, reply, data);
+      this.handleFunctionCall(reply, data);
     } else if (tag.startsWith('repl:call:')) {
-      this.handleFunctionCallReply(receiver, tag, reply, data);
+      this.handleFunctionCallReply(tag, reply, data);
+    } else if (tag === 'checkAgentExists') {
+      this.handleCheckAgentExists(reply, data);
     }
   }
-  handleConnect(receiver, reply, data) {
+  handleConnect(reply, data) {
     const { agentName } = data;
     this.agentCallFuncs[agentName] = reply;
     reply('repl:connect');
   }
-  handleFunctionCall(receiver, reply, data) {
+  handleFunctionCall(reply, data) {
     const { targetAgent, callId, funcName, args } = data;
     const agentCallFunc = this.agentCallFuncs[targetAgent];
     // if no target agent
@@ -47,14 +49,19 @@ class Master {
     this.callReplyFuncs[globalCallId] = reply;
     agentCallFunc('call', { callId: globalCallId, funcName, args });
   }
-  handleFunctionCallReply(receiver, tag, reply, data) {
+  handleFunctionCallReply(tag, reply, data) {
     const globalCallId = parseInt(tag.substring(10)); // 'repl:call:'.length
     const { result, error } = data;
     const localCallId = this.localCallIds[globalCallId];
     const replyFunc = this.callReplyFuncs[globalCallId];
     replyFunc(`repl:call:${localCallId}`, { result, error });
-    delete this.funcIdByCallId[globalCallId];
+    delete this.localCallIds[globalCallId];
     delete this.callReplyFuncs[globalCallId];
+  }
+  handleCheckAgentExists(reply, data) {
+    const { targetAgent, replyTag } = data;
+    const isExists = (targetAgent in this.agentCallFuncs);
+    reply(replyTag, { result: isExists });
   }
 }
 

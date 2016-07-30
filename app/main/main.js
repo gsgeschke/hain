@@ -23,9 +23,9 @@
 
   co(function* () {
     const app = require('./server/app/app');
+    const server = require('./server/server');
     app.launch();
-    require('./server/server').initialize(app);
-    require('./server/rpc-server').startProcessingQueue();
+    server.initialize();
   }).catch((err) => {
     dialog.showErrorBox('Hain', `Unhandled Error: ${err.stack || err}`);
     electronApp.quit();

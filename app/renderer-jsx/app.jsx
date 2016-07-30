@@ -13,8 +13,13 @@ const React = require('react');
 const ReactDOM = require('react-dom');
 
 const RPCRenderer = require('./rpc-renderer');
-const rpc = new RPCRenderer('mainwindow');
 const remote = require('electron').remote;
+
+const Agent = require('../main/shared/ipc/agent');
+const RendererTransport = require('../main/shared/ipc/transports/renderer-transport');
+
+const agent = new Agent('mainWindow');
+agent.connect(new RendererTransport());
 
 const textUtil = require('./text-util');
 
@@ -75,27 +80,24 @@ class AppContainer extends React.Component {
 
   componentDidMount() {
     this.refs.query.focus();
-    rpc.connect();
-    rpc.on('on-load', (evt, msg) => {
+    agent.define('initialize', () => {
       this.isLoaded = true;
       this.setQuery('', true);
     });
-    rpc.on('on-reloading', (evt, msg) => {
+    agent.define('reload', () => {
       this.isLoaded = false;
       this.forceUpdate();
     });
-    rpc.on('on-toast', (evt, msg) => {
-      const { message, duration } = msg;
-      this.toastQueue.push({ message, duration });
+    agent.define('enqueueToast', (message, duration) => {
+      this.toastQueue.push(message, duration);
     });
-    rpc.on('on-log', (evt, msg) => {
+    agent.define('logToConsole', (msg) => {
       console.log(msg);
     });
-    rpc.on('set-query', (evt, args) => {
-      this.setQuery(args);
+    agent.define('setQuery', (query) => {
+      this.setQuery(query);
     });
-    rpc.on('on-result', (evt, msg) => {
-      const { ticket, type, payload } = msg;
+    agent.define('updateResult', (ticket, type, payload) => {
       if (searchTicket.current !== ticket)
         return;
 
@@ -131,8 +133,7 @@ class AppContainer extends React.Component {
 
       this.setState({ results, selectionIndex });
     });
-    rpc.on('on-render-preview', (evt, msg) => {
-      const { ticket, html } = msg;
+    agent.define('renderPreview', (ticket, html) => {
       if (previewTicket.current !== ticket)
         return;
       if (this.state.previewHtml === html)
@@ -176,7 +177,7 @@ class AppContainer extends React.Component {
 
     clearTimeout(this.lastSearchTimer);
     this.lastSearchTimer = setTimeout(() => {
-      rpc.send('search', { ticket, query });
+      agent.call('worker', 'requestSearch', ticket, query);
     }, SEND_INTERVAL);
     clearTimeout(this.lastClearTimer);
     this.lastClearTimer = setTimeout(() => {
@@ -189,12 +190,7 @@ class AppContainer extends React.Component {
   execute(item) {
     if (item === undefined)
       return;
-    const params = {
-      pluginId: item.pluginId,
-      id: item.id,
-      payload: item.payload
-    };
-    rpc.call('execute', params);
+    agent.call('worker', 'requestExecute', item.pluginId, item.id, item.payload);
   }
 
   updatePreview() {
@@ -215,7 +211,7 @@ class AppContainer extends React.Component {
     this._renderedPreviewHash = previewHash;
 
     const ticket = previewTicket.newTicket();
-    rpc.send('renderPreview', { ticket, pluginId, id, payload });
+    agent.call('worker', 'requestRenderPreview', ticket, pluginId, id, payload);
   }
 
   handleSelection(selectionDelta) {
@@ -235,7 +231,7 @@ class AppContainer extends React.Component {
   handleEsc() {
     const query = this.state.query;
     if (query === undefined || query.length <= 0) {
-      rpc.call('close');
+      agent.call('server', 'close');
       return;
     }
     this.setQuery('');
@@ -343,7 +339,7 @@ class AppContainer extends React.Component {
     const pluginId = result.pluginId;
     const id = result.id;
     const payload = result.payload;
-    rpc.send('buttonAction', { pluginId, id, payload });
+    agent.call('worker', 'requestButtonAction', pluginId, id, payload);
   }
 
   parseIconUrl(iconUrl) {

@@ -105,8 +105,5 @@ module.exports = {
   restart,
   quit,
   openPreferences,
-  reloadPlugins,
-  get isRestarting() {
-    return _isRestarting;
-  }
+  reloadPlugins
 };

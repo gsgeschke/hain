@@ -1,6 +1,16 @@
 'use strict';
 
-const lo_assign = require('lodash.assign');
+// --
+// Server
+// App
+// --
+
+// Worker
+// Renderer
+
+// 문제점들
+// 1. 실행 순서 (server, app 순서가 꼬인다)
+// 2. Preferences를 중간에 hook해야 함
 
 const cp = require('child_process');
 const fs = require('fs');
@@ -8,70 +18,41 @@ const path = require('path');
 const logger = require('../shared/logger');
 const electronApp = require('electron').app;
 
-const rpc = require('./rpc-server');
+const app = require('./app/app');
 const proxyHandler = require('./proxy-handler');
 const pref = require('./app-pref');
-const asyncutil = require('../shared/asyncutil');
 
-let app = null;
+const ForkReceiver = require('../shared/ipc/receivers/fork-receiver');
+
+const Master = require('../shared/ipc/master');
+const DirectReceiver = require('../shared/ipc/receivers/direct-receiver');
+const RendererReceiver = require('../shared/ipc/receivers/renderer-receiver');
+
+const master = new Master();
+master.addReceiver(new DirectReceiver('server'));
+master.addReceiver(new RendererReceiver('mainWindow'));
+master.addReceiver(new RendererReceiver('prefWindow'));
+
+const agent = require('./server-agent');
+
 let workerProcess = null;
-let isPluginsReady = false;
-
-let workerHandlers = {
-  error: (payload) => logger.log(`Unhandled Plugin Error: ${payload}`),
-  ready: (payload) => (isPluginsReady = true),
-  proxy: (payload) => {
-    const { service, func, args } = payload;
-    proxyHandler.handle(service, func, args);
-  },
-  'on-ipc-pipe': (payload) => {
-    const { target, channel, msg } = payload;
-    rpc.send(target, channel, msg);
-  }
-};
-
-function mergeWorkerHandlers(handlers) {
-  workerHandlers = lo_assign(workerHandlers, handlers);
-}
-
-function handleWorkerMessage(msg) {
-  const handler = workerHandlers[msg.type];
-  if (handler === undefined)
-    throw new Error('can\'t find a worker handler');
-  handler(msg.payload);
-}
-
-const _preMsgQueue = [];
-let _readyToSendmsg = false;
+let workerReceiver = null;
+let isWorkerReady = false;
 
 function reloadWorker() {
-  isPluginsReady = false;
-  _readyToSendmsg = false;
+  isWorkerReady = false;
 
   if (workerProcess !== null) {
     workerProcess.kill();
     workerProcess = null;
   }
-  rpc.send('mainwindow', 'on-reloading');
+
+  // TODO Implementation
+  // if (workerReceiver !== null)
+  //   master.removeReceiver(workerReceiver);
+
+  agent.call('mainWindow', 'reload');
   loadWorker();
-}
-
-function waitForSendmsgReady() {
-  asyncutil.runWhen(() => (workerProcess !== null && workerProcess.connected), () => {
-    _readyToSendmsg = true;
-    while (_preMsgQueue.length > 0) {
-      const msg = _preMsgQueue.shift();
-      workerProcess.send(msg);
-    }
-  });
-}
-
-function sendmsg(type, payload) {
-  if (!_readyToSendmsg) {
-    _preMsgQueue.push({ type, payload });
-    return;
-  }
-  workerProcess.send({ type, payload });
 }
 
 function loadWorker() {
@@ -83,23 +64,20 @@ function loadWorker() {
     execArgv: ['--always-compact'],
     silent: true
   });
-  workerProcess.on('message', (msg) => {
-    handleWorkerMessage(msg);
-  });
+  workerReceiver = new ForkReceiver(workerProcess);
+  master.addReceiver(workerReceiver);
 
-  const initialGlobalPref = pref.get();
-  sendmsg('initialize', { initialGlobalPref });
-  waitForSendmsgReady();
-  asyncutil.runWhen(() => isPluginsReady, () => {
-    rpc.send('mainwindow', 'on-load');
+  agent.wait('worker', function* () {
+    const initialGlobalPref = pref.get();
+    yield agent.call('worker', 'initialize', initialGlobalPref);
+    agent.call('mainWindow', 'initialize');
+    isWorkerReady = true;
   });
 }
 
-function initialize(_app) {
-  app = _app;
-
+function initialize() {
+  agent.connect();
   loadWorker();
-  proxyHandler.initialize(_app);
 
   electronApp.on('quit', () => {
     try {
@@ -109,101 +87,83 @@ function initialize(_app) {
   });
 }
 
-const appPrefId = 'Hain';
-const workerPrefHandlers = {
-  'on-get-plugin-pref-ids': (payload) => {
-    const pluginPrefIds = payload;
-    const appPrefItem = {
-      id: appPrefId,
-      group: 'Application'
-    };
-    const pluginPrefItems = pluginPrefIds.map(x => ({
-      id: x,
-      group: 'Plugins'
-    }));
-    const prefItems = [appPrefItem].concat(pluginPrefItems);
-    rpc.send('prefwindow', 'on-get-pref-items', prefItems);
-  },
-  'on-get-preferences': (payload) => {
-    const { prefId, schema, model } = payload;
-    rpc.send('prefwindow', 'on-get-preferences', { prefId, schema, model });
-  }
-};
-mergeWorkerHandlers(workerPrefHandlers);
+// const appPrefId = 'Hain';
+// const workerPrefHandlers = {
+//   'on-get-plugin-pref-ids': (payload) => {
+//     const pluginPrefIds = payload;
+//     const appPrefItem = {
+//       id: appPrefId,
+//       group: 'Application'
+//     };
+//     const pluginPrefItems = pluginPrefIds.map(x => ({
+//       id: x,
+//       group: 'Plugins'
+//     }));
+//     const prefItems = [appPrefItem].concat(pluginPrefItems);
+//     rpc.send('prefwindow', 'on-get-pref-items', prefItems);
+//   },
+//   'on-get-preferences': (payload) => {
+//     const { prefId, schema, model } = payload;
+//     rpc.send('prefwindow', 'on-get-preferences', { prefId, schema, model });
+//   }
+// };
+// mergeWorkerHandlers(workerPrefHandlers);
+
+agent.define('logError', (msg) => logger.log(`Unhandled Plugin Error: ${msg}`));
+agent.define('callProxyFunc', (service, func, args) => proxyHandler.handle(service, func, args));
 
 // Preferences
-rpc.on('getPrefItems', (evt, msg) => {
-  sendmsg('getPluginPrefIds');
-});
+// rpc.on('getPrefItems', (evt, msg) => {
+//   sendmsg('getPluginPrefIds');
+// });
 
-rpc.on('getPreferences', (evt, msg) => {
-  const prefId = msg;
-  if (prefId === appPrefId) {
-    const schema = JSON.stringify(pref.schema);
-    const model = pref.get();
-    rpc.send('prefwindow', 'on-get-preferences', { prefId, schema, model });
-    return;
-  }
-  sendmsg('getPreferences', prefId);
-});
+// rpc.on('getPreferences', (evt, msg) => {
+//   const prefId = msg;
+//   if (prefId === appPrefId) {
+//     const schema = JSON.stringify(pref.schema);
+//     const model = pref.get();
+//     rpc.send('prefwindow', 'on-get-preferences', { prefId, schema, model });
+//     return;
+//   }
+//   sendmsg('getPreferences', prefId);
+// });
 
-rpc.on('updatePreferences', (evt, msg) => {
-  const { prefId, model } = msg;
-  if (prefId === appPrefId) {
-    pref.update(model);
-    return;
-  }
-  sendmsg('updatePreferences', msg);
-});
+// rpc.on('updatePreferences', (evt, msg) => {
+//   const { prefId, model } = msg;
+//   if (prefId === appPrefId) {
+//     pref.update(model);
+//     return;
+//   }
+//   sendmsg('updatePreferences', msg);
+// });
 
-rpc.on('resetPreferences', (evt, msg) => {
-  const prefId = msg;
-  if (prefId === appPrefId) {
-    const schema = JSON.stringify(pref.schema);
-    const model = pref.reset();
-    rpc.send('prefwindow', 'on-get-preferences', { prefId, schema, model });
-    return;
-  }
-  sendmsg('resetPreferences', prefId);
-});
+// rpc.on('resetPreferences', (evt, msg) => {
+//   const prefId = msg;
+//   if (prefId === appPrefId) {
+//     const schema = JSON.stringify(pref.schema);
+//     const model = pref.reset();
+//     rpc.send('prefwindow', 'on-get-preferences', { prefId, schema, model });
+//     return;
+//   }
+//   sendmsg('resetPreferences', prefId);
+// });
 
-function commitPreferences() {
-  sendmsg('commitPreferences');
+// function commitPreferences() {
+//   sendmsg('commitPreferences');
 
-  if (pref.isDirty) {
-    const globalPref = pref.get();
-    sendmsg('updateGlobalPreferences', globalPref);
-    pref.commit();
-  }
-}
+//   if (pref.isDirty) {
+//     const globalPref = pref.get();
+//     sendmsg('updateGlobalPreferences', globalPref);
+//     pref.commit();
+//   }
+// }
 
-rpc.on('search', (evt, msg) => {
-  const { ticket, query } = msg;
-  sendmsg('searchAll', { ticket, query });
-});
-
-rpc.define('execute', function* (params) {
-  const { pluginId, id, payload } = params;
-  sendmsg('execute', { pluginId, id, payload });
-});
-
-rpc.on('renderPreview', (evt, msg) => {
-  const { ticket, pluginId, id, payload } = msg;
-  sendmsg('renderPreview', { ticket, pluginId, id, payload });
-});
-
-rpc.on('buttonAction', (evt, msg) => {
-  const { pluginId, id, payload } = msg;
-  sendmsg('buttonAction', { pluginId, id, payload });
-});
-
-rpc.define('close', function* () {
+agent.define('close', function* () {
   app.close();
 });
 
 module.exports = {
   initialize,
-  commitPreferences,
   reloadWorker,
-  get isLoaded() { return (workerProcess !== null && workerProcess.connected && isPluginsReady); }
+  get isLoaded() { return (workerProcess !== null && isWorkerReady); }
 };

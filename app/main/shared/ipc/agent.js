@@ -2,12 +2,30 @@
 
 const co = require('co');
 
+function isGeneratorFunction(func) {
+  return func.constructor.name === 'GeneratorFunction';
+}
+
+function runAnyFuncAsPromise(func, args) {
+  const _args = args || [];
+  if (isGeneratorFunction(func))
+    return co(func.apply(this, _args));
+  return new Promise((resolve, reject) => {
+    try {
+      resolve(func.apply(this, _args));
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 class Agent {
-  constructor(name) {
+  constructor(name, defaultTransport) {
     this.name = name;
     this.transport = null;
     this.funcs = {};
     this.nextCallId = 0;
+    this.defaultTransport = defaultTransport;
   }
   allocateCallId() {
     this.nextCallId += 1;
@@ -16,9 +34,10 @@ class Agent {
     return this.nextCallId;
   }
   connect(transport) {
+    const _transport = transport || this.defaultTransport;
     return new Promise((resolve, reject) => {
       // TODO add error handling
-      this.transport = transport;
+      this.transport = _transport;
       this.transport.activate(this.name);
       this.transport.on('repl:connect', (data) => resolve());
       this.transport.send('connect', { agentName: this.name });
@@ -29,15 +48,15 @@ class Agent {
     this.transport.on('call', (data) => {
       const { callId, funcName, args } = data;
       const replyTag = `repl:call:${callId}`;
-      const selectedGenerator = this.funcs[funcName];
-      if (selectedGenerator === undefined) {
+      const func = this.funcs[funcName];
+      if (func === undefined) {
         return this.transport.send(replyTag, {
           callId,
           error: 'undefined function'
         });
       }
 
-      return co(selectedGenerator.apply(this, args))
+      return co(runAnyFuncAsPromise(func, args))
         .then((result) => {
           this.transport.send(replyTag, { callId, result });
         })
@@ -46,8 +65,8 @@ class Agent {
         });
     });
   }
-  define(funcName, generator) {
-    this.funcs[funcName] = generator;
+  define(funcName, func) {
+    this.funcs[funcName] = func;
   }
   call(targetAgent, funcName, ...args) {
     const thisCallId = this.allocateCallId();
@@ -64,6 +83,28 @@ class Agent {
         funcName,
         args
       });
+    });
+  }
+  wait(targetAgent, func) {
+    let intervalId = 0;
+    intervalId = setInterval(() => {
+      this._checkAgentExists(targetAgent).then((exists) => {
+        if (!exists)
+          return;
+        clearInterval(intervalId);
+        runAnyFuncAsPromise(func);
+      });
+    }, 50);
+  }
+  _checkAgentExists(targetAgent) {
+    return new Promise((resolve, reject) => {
+      const thisCallId = this.allocateCallId();
+      const replyTag = `repl:checkAgentExists:${thisCallId}`;
+      this.transport.once(replyTag, (data) => {
+        const { result } = data;
+        resolve(result);
+      });
+      this.transport.send('checkAgentExists', { targetAgent, replyTag });
     });
   }
 }
