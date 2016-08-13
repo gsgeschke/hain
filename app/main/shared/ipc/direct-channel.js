@@ -1,46 +1,25 @@
 'use strict';
 
-const channels = {};
-
 class DirectChannel {
   constructor() {
     this.receiverListener = null;
     this.transportListeners = {};
-    this.transportOnceListeners = {};
   }
-  listenForReceiver(listener) {
+  listenFromReceiver(listener) {
     this.receiverListener = listener;
   }
-  listenForTransport(tag, listener) {
-    this.transportListeners[tag] = listener;
+  listenFromTransport(agentName, listener) {
+    this.transportListeners[agentName] = listener;
   }
-  listenOnceForTransport(tag, listener) {
-    this.transportOnceListeners[tag] = listener;
+  sendFromReceiver(agentName, tag, data) {
+    const transportListener = this.transportListeners[agentName];
+    if (transportListener)
+      transportListener(tag, data);
   }
-  sendFromReceiver(tag, data) {
-    const listener = this.transportListeners[tag];
-    if (listener)
-      listener(data);
-
-    const onceListener = this.transportOnceListeners[tag];
-    if (onceListener) {
-      onceListener(data);
-      delete this.transportOnceListeners[tag];
-    }
-  }
-  sendFromTransport(tag, data) {
-    this.receiverListener({ tag, data });
+  sendFromTransport(agentName, tag, data) {
+    if (this.receiverListener)
+      this.receiverListener(agentName, tag, data);
   }
 }
 
-module.exports = {
-  getChannel: (channelName) => {
-    let channel = channels[channelName];
-    if (channel !== undefined)
-      return channel;
-
-    channel = new DirectChannel();
-    channels[channelName] = channel;
-    return channel;
-  }
-};
+module.exports = new DirectChannel();

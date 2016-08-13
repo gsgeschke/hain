@@ -4,13 +4,13 @@ const ipcRenderer = require('electron').ipcRenderer;
 
 class RendererTransport {
   constructor() {
-    this.ipcTag = null;
+    this.agentName = null;
     this.listeners = {};
     this.onceListeners = {};
   }
   activate(agentName) {
-    this.ipcTag = `ipc:${agentName}`;
-    ipcRenderer.on(this.ipcTag, this.onMessage.bind(this));
+    this.agentName = agentName;
+    ipcRenderer.on('::ipc', this.onMessage.bind(this));
   }
   on(tag, handler) {
     this.listeners[tag] = handler;
@@ -19,7 +19,8 @@ class RendererTransport {
     this.onceListeners[tag] = handler;
   }
   send(tag, data) {
-    ipcRenderer.send(this.ipcTag, { tag, data });
+    const agentName = this.agentName;
+    ipcRenderer.send('::ipc', { agentName, tag, data });
   }
   onMessage(event, arg) {
     const { tag, data } = arg;

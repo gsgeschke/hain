@@ -3,24 +3,18 @@
 const DirectChannel = require('../direct-channel');
 
 class DirectReceiver {
-  constructor(targetAgent) {
+  constructor() {
     this.masterHandler = null;
-    this.directChannel = null;
-    this.targetAgent = targetAgent;
   }
   startListen(masterHandler) {
     this.masterHandler = masterHandler;
-    this.directChannel = DirectChannel.getChannel(this.targetAgent);
-    this.directChannel.listenForReceiver(this.onMessage.bind(this));
+    DirectChannel.listenForReceiver(this.onMessage.bind(this));
   }
-  onMessage(msg) {
-    if (this.masterHandler === null)
-      return;
-    const { tag, data } = msg;
-    this.masterHandler(this, this.reply.bind(this), tag, data);
+  onMessage(agentName, tag, data) {
+    this.masterHandler(this, this.reply.bind(this, agentName), tag, data);
   }
-  reply(tag, data) {
-    this.directChannel.sendFromReceiver(tag, data);
+  reply(agentName, tag, data) {
+    DirectChannel.sendFromReceiver(agentName, tag, data);
   }
 }
 

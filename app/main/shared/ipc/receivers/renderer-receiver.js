@@ -3,23 +3,22 @@
 const ipcMain = require('electron').ipcMain;
 
 class RendererReceiver {
-  constructor(targetAgent) {
-    this.targetAgent = targetAgent;
+  constructor() {
     this.masterHandler = null;
-    this.ipcTag = `ipc:${targetAgent}`;
-    this.replySender = null;
+    this.replySenders = {};
   }
   startListen(masterHandler) {
     this.masterHandler = masterHandler;
-    ipcMain.on(this.ipcTag, this.onMessage.bind(this));
+    ipcMain.on('::ipc', this.onMessage.bind(this));
   }
   onMessage(event, arg) {
-    const { tag, data } = arg;
-    this.replySender = event.sender;
-    this.masterHandler(this, this.reply.bind(this), tag, data);
+    const { agentName, tag, data } = arg;
+    this.replySender[agentName] = event.sender;
+    this.masterHandler(this, this.reply.bind(this, agentName), tag, data);
   }
-  reply(tag, data) {
-    this.replySender.send(this.ipcTag, { tag, data });
+  reply(agentName, tag, data) {
+    const replySender = this.replySenders[agentName];
+    replySender.send('::ipc', { tag, data });
   }
 }
 
