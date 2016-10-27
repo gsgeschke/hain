@@ -30,7 +30,7 @@ module.exports = class AppService {
     this.workerClient = workerClient;
     this.workerProxy = workerProxy;
 
-    this.mainWindow = new MainWindow(workerProxy);
+    this.mainWindow = new MainWindow(workerProxy, prefManager.appPref);
     this.prefWindow = new PrefWindow(prefManager);
     this.trayService = new TrayService(this, autoLauncher);
     this.shortcutService = new ShortcutService(this, prefManager.appPref);
@@ -59,10 +59,7 @@ module.exports = class AppService {
             self.mainWindow.show();
           if (isRestarted)
             self.mainWindow.enqueueToast('Restarted');
-
-          // Open the devtools.
-          self.mainWindow.browserWindow.openDevTools();
-         });
+        });
 
         self.trayService.createTray();
         iconProtocol.register();
@@ -101,5 +98,10 @@ module.exports = class AppService {
     this.workerProxy.initialize(this.prefManager.appPref.get());
     this.mainWindow.setQuery('');
     this.mainWindow.notifyPluginsReloading();
+  }
+  setSelectionIndex(selId) {
+    this.mainWindow.show();
+    if (selId !== undefined)
+      this.mainWindow.setSelectionIndex(selId);
   }
 };

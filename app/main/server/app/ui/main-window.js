@@ -11,8 +11,9 @@ const RpcChannel = require('../../../shared/rpc-channel');
 const ipc = electron.ipcMain;
 
 module.exports = class MainWindow {
-  constructor(workerProxy) {
+  constructor(workerProxy, appPref) {
     this.workerProxy = workerProxy;
+    this.appPref = appPref;
     this.browserWindow = null;
     this.rpc = RpcChannel.create('#mainWindow', this._send.bind(this), this._on.bind(this));
     this._setupHandlers();
@@ -79,7 +80,7 @@ module.exports = class MainWindow {
       return;
 
     platformUtil.saveFocus();
-    windowUtil.centerWindowOnSelectedScreen(this.browserWindow);
+    windowUtil.centerWindowOnSelectedScreen(this.browserWindow, this.appPref.get('openOnActiveDisplay'));
     this.browserWindow.show();
   }
   hide(dontRestoreFocus) {
@@ -106,6 +107,9 @@ module.exports = class MainWindow {
   }
   setQuery(query) {
     this.rpc.call('setQuery', query);
+  }
+  setSelectionIndex(selId) {
+    this.rpc.call('setSelectionIndex', selId);
   }
   enqueueToast(message, duration) {
     this.rpc.call('enqueueToast', { message, duration });
